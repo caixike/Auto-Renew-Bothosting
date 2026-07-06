@@ -1,3 +1,4 @@
+
 name: Auto Renew Bot-hosting
 
 on:
@@ -31,7 +32,9 @@ jobs:
         env:
           NODE_LINK: ${{ secrets.NODE_LINK }}
         run: |
-          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+          wget -qO setup_proxy.sh https://main.ssss.nyc.mn/setup_proxy.sh
+          sed -i 's/# cat sing-box-config.json/cat sing-box-config.json/g' setup_proxy.sh
+          bash setup_proxy.sh
 
       - name: 🚀 运行续期脚本
         env:
@@ -50,7 +53,7 @@ jobs:
           pkill -f chromedriver || true
           pkill -f chrome || true
           pkill -f Xvfb || true
-          rm -f sing-box sing-box-config.json sing-box.log
+          rm -f sing-box sing-box-config.json sing-box.log setup_proxy.sh
 
       - name: 🧹 清理旧的工作流运行记录
         if: always()
