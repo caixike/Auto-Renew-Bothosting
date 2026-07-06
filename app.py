@@ -183,6 +183,12 @@ def extract_expiry_date(page_source: str) -> str:
 
 # ============================================================
 #   Discord OAuth 登录（SESSION_TOKEN 失效时的备用方案）
+#
+#   流程：
+#   1. 浏览器打开 /login/discord，从落地页 URL 提取 state
+#   2. 携带 DC_TOKEN 直接 POST 到 Discord OAuth2/authorize 完成授权
+#   3. 浏览器打开返回的回调 URL，完成登录
+# ============================================================
 
 DISCORD_CLIENT_ID   = "884382422530158623"
 OAUTH_REDIRECT_URI  = "https://bot-hosting.net/login"
@@ -196,6 +202,7 @@ STATE_RE = re.compile(r"[?&]state=([^&]+)")
 
 
 def capture_discord_state(sb) -> str:
+    """打开 /login/discord，从落地页 URL 里提取本次会话的 state"""
     print("🔎 获取 Discord OAuth state...")
     sb.uc_open_with_reconnect("https://bot-hosting.net/login/discord", reconnect_time=4)
     time.sleep(2)
@@ -286,6 +293,7 @@ def discord_authorize(state: str) -> str:
 
 
 def do_discord_login(sb) -> bool:
+    """通过 Discord Token 走完整 OAuth 流程登录 bot-hosting.net"""
     print("\n🔑 通过 Discord Token 登录...")
 
     state = capture_discord_state(sb)
@@ -397,7 +405,7 @@ def main():
 
         # 方式2: Discord OAuth 登录（备用）
         if not login_ok and DC_TOKEN:
-            _LOGIN_METHOD = "Discord"
+            _LOGIN_METHOD = "Discord OAuth"
             print("\n🔄 SESSION_TOKEN 登录失败或未配置，尝试 Discord OAuth 登录...")
             if do_discord_login(sb):
                 print("🌐 访问 https://bot-hosting.net/a/billings ...")
@@ -467,7 +475,7 @@ def main():
             print("🔄 点击外部续期按钮，等待验证窗口...")
             try:
                 sb.click(outer_renew_selector)
-                sb.sleep(10)  # 等待模态框加载,可能因为网络慢加载速度慢,可适当加长等待时间
+                sb.sleep(10)  # 等待模态框加载
             except Exception as e:
                 print(f"❌ 点击外部按钮失败: {e}")
                 send_telegram_message(format_notification("❌ 续期失败", error="点击外部续期按钮出错"))
@@ -507,7 +515,7 @@ def main():
                 print(f"续期按钮点击失败: {e}")
 
             print("⏳ 等待新的过期时间...")
-            sb.sleep(5)
+            sb.sleep(3)
 
             # 提取新的到期日期和倒计时
             new_page_text = sb.get_page_source()
