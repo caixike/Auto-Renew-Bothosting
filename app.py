@@ -124,20 +124,15 @@ def format_notification(status: str, extra: str = "", error: str = "", expiry_da
     lines.append(f"⏱️ 登录时间: {now}")
     return "\n".join(lines)
 
-# 等待Turnstile验证通过（优化版）
-def wait_for_turnstile_pass(sb, timeout=60):
+# 等待Turnstile验证通过
+def wait_for_turnstile_pass(sb, timeout=30):
     start = time.time()
     cf_indicators = ["verify you are human", "确认您是真人", "troubleshoot", "just a moment"]
     while time.time() - start < timeout:
         page_lower = sb.get_page_source().lower()
-        # 检测Turnstile容器状态
-        page_lower_no_cf = not any(x in page_lower for x in cf_indicators)
-        
-        # 额外检测：Turnstile 通过后的特征
-        turnstile_success = "turnstile" in page_lower and ("success" in page_lower or "passed" in page_lower or "complete" in page_lower or "verified" in page_lower)
-        
-        if page_lower_no_cf or turnstile_success:
+        if not any(x in page_lower for x in cf_indicators):
             print("✅ Turnstile 验证已通过")
+            # sb.save_screenshot("turnstile_passed.png")
             return True
         sb.sleep(1)
     print("❌ Turnstile 验证超时未通过")
@@ -165,7 +160,7 @@ def format_countdown(countdown_str: str) -> str:
     except:
         return countdown_str
 
-# 获取过期日期（优化版，增加更多匹配模式）
+# 获取过期日期
 def extract_expiry_date(page_source: str) -> str:
     patterns = [
         r"[Ee]xpires\s*[:\-]?\s*(\d{4}/\d{2}/\d{2})",   # Expires 2026/07/07
@@ -173,9 +168,6 @@ def extract_expiry_date(page_source: str) -> str:
         r"(\d{4}/\d{2}/\d{2})\s*[\-–]\s*renew",        # 2026/07/07 - renew
         r"(\d{2}/\d{2}/\d{4})\s*[\-–]\s*renew",        # 07/07/2026 - renew
         r"(\d{4}/\d{2}/\d{2})\s*[\-–]\s*renew manually to extend for 4 days", # 2026/07/07 - renew manually to extend for 4 days
-        r"(\d{4}\.\d{2}\.\d{2})",                        # 2026.07.11 (点号分隔)
-        r"到期.*?(\d{4}/\d{2}/\d{2})",                   # 到期 2026/07/11
-        r"到期.*?(\d{4}\.\d{2}\.\d{2})",                 # 到期 2026.07.11
     ]
     for pattern in patterns:
         match = re.search(pattern, page_source)
@@ -185,11 +177,8 @@ def extract_expiry_date(page_source: str) -> str:
             if len(date_str.split('/')[-1]) == 4:  # 年份长度4
                 parts = date_str.split('/')
                 if len(parts[0]) == 2:  # 第一部分是2位（月）
+                    # 修正：将 MM/DD/YYYY 转为 YYYY/MM/DD
                     return f"{parts[2]}/{parts[0]}/{parts[1]}"
-            # 点号分隔也处理
-            if '.' in date_str:
-                parts = date_str.split('.')
-                return f"{parts[0]}/{parts[1]}/{parts[2]}"
             return date_str
     return None
 
@@ -488,122 +477,46 @@ def main():
                 send_telegram_message(format_notification("❌ 续期失败", error="点击外部续期按钮出错"))
                 return
 
-            # 处理弹窗中的 Turnstile（优化版）
+            # 处理弹窗中的 Turnstile
             print("🔒 检测弹窗中的 Turnstile 验证...")
             turnstile_passed = False
-            
-            # 先检查Turnstile是否已经自动通过（不用手动点击）
-            time.sleep(5)
-            page_after_open = sb.get_page_source()
-            cf_indicators = ["verify you are human", "确认您是真人", "troubleshoot", "just a moment"]
-            has_turnstile = any(x in page_after_open.lower() for x in cf_indicators)
-            
-            if not has_turnstile:
-                print("✅ Turnstile 已自动通过，无需手动验证")
-                turnstile_passed = True
-            else:
-                # 需要手动触发Turnstile
-                print("⏳ Turnstile 待验证，尝试自动通过...")
-                for attempt in range(1, 4):
-                    try:
-                        sb.uc_gui_click_captcha()
-                        time.sleep(15)  # 等待Turnstile验证完成
-                    except Exception as e:
-                        print(f"⚠️ 点击 Turnstile 出错: {e}")
+            for attempt in range(1, 4):
+                try:
+                    sb.uc_gui_click_captcha()
+                    time.sleep(12)
+                except Exception as e:
+                    print(f"⚠️ 点击 Turnstile 出错: {e}")
 
-                    if wait_for_turnstile_pass(sb, timeout=30):
-                        turnstile_passed = True
-                        break
-                    else:
-                        print(f"⏳ 第 {attempt} 次未通过，重试点击...")
-                        time.sleep(3)
+                if wait_for_turnstile_pass(sb, timeout=20):
+                    turnstile_passed = True
+                    break
+                else:
+                    print(f"⏳ 第 {attempt} 次未通过，重试点击...")
 
             if not turnstile_passed:
                 print("❌ Turnstile 验证最终未通过，脚本退出")
                 send_telegram_message(format_notification("❌ 续期失败", error="Turnstile 验证未通过"))
                 return
 
-            print("⏳ 等待弹窗刷新并点击续期确认...")
-            time.sleep(5)
-
-            # 打印页面片段帮助调试
-            debug_source = sb.get_page_source()
-            debug_lower = debug_source.lower()
-            if "renew" in debug_lower:
-                # 提取包含renew的行
-                for line in debug_source.split('\n'):
-                    if 'renew' in line.lower() and len(line.strip()) > 10:
-                        print(f"   🔍 DEBUG: {line.strip()[:200]}")
-
-            # 尝试多种选择器点击续期确认按钮
-            modal_selectors = [
-                'button:contains("Renew for 4 days")',
-                'button:contains("Renew for")',
-                'button:contains("Extend")',
-                'button:contains("Confirm")',
-                'button:contains("续期")',
-                '[class*="modal"] button',
-                '[role="dialog"] button',
-                'button:contains("Renew")',
-            ]
+            # 点击续期按钮
+            print("⏳ 等待续期按钮可用并点击...")
+            time.sleep(5) 
 
             modal_button_clicked = False
-            for selector in modal_selectors:
-                try:
-                    if sb.is_element_visible(selector, timeout=3):
-                        btn_text = sb.get_text(selector)
-                        print(f"🔘 找到弹窗按钮: '{btn_text}' (selector: {selector})")
-                        sb.click(selector, timeout=3)
-                        modal_button_clicked = True
-                        print("✅ 已点击续期确认按钮")
-                        break
-                except Exception as e:
-                    print(f"⚠️ 尝试选择器 '{selector}' 失败: {e}")
-                    continue
-
-            if not modal_button_clicked:
-                print("❌ 未找到续期确认按钮，页面截图保存")
-                sb.save_screenshot("renew_no_button.png")
-                send_telegram_message(format_notification("❌ 续期失败", error="未找到续期确认按钮"))
-                return
-
-            # 等待续期完成（增加等待时间）
-            print("⏳ 等待续期处理...")
-            sb.sleep(10)
-
-            # 尝试关闭可能出现的弹窗
             try:
-                # 尝试关闭可能的 success 弹窗
-                close_selectors = [
-                    'button:contains("Close")',
-                    'button:contains("OK")',
-                    'button:contains("关闭")',
-                    '[aria-label="Close"]',
-                    '.btn-close',
-                ]
-                for sel in close_selectors:
-                    try:
-                        if sb.is_element_visible(sel, timeout=2):
-                            sb.click(sel)
-                            print(f"✅ 关闭了弹窗")
-                            sb.sleep(2)
-                            break
-                    except:
-                        pass
-            except:
-                pass
+                sb.click('button:contains("Renew for 4 days")', timeout=8)
+                modal_button_clicked = True
+                print("✅ 已点击续期按钮")
+            except Exception as e:
+                print(f"续期按钮点击失败: {e}")
 
-            # 重新访问 billings 页面获取最新状态
-            print("🔄 刷新账单页面获取最新状态...")
-            sb.open("https://bot-hosting.net/a/billings")
-            sb.wait_for_ready_state_complete()
-            sb.sleep(5)
+            print("⏳ 等待新的过期时间...")
+            sb.sleep(6)
 
             # 提取新的到期日期和倒计时
             new_page_text = sb.get_page_source()
             new_expiry = extract_expiry_date(new_page_text)
             new_match = re.search(r"Renew in (\d{2}:\d{2}:\d{2})", new_page_text)
-            
             if new_match:
                 new_countdown = new_match.group(1)
                 print(f"✅ 续期成功！新的倒计时: {new_countdown}")
@@ -627,12 +540,6 @@ def main():
                         )
                     )
                 else:
-                    # 增加调试信息：打印页面中所有可能包含日期的片段
-                    print("⚠️ 续期结果未知，打印页面关键信息辅助排查...")
-                    for line in new_page_text.split('\n'):
-                        if '202' in line and ('renew' in line.lower() or 'expire' in line.lower() or 'day' in line.lower()):
-                            print(f"   🔍 可能相关的行: {line.strip()[:300]}")
-                    
                     print("⚠️ 续期结果未知，到期日期未变化，请手动检查")
                     send_telegram_message(
                         format_notification(
