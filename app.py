@@ -341,6 +341,21 @@ def do_discord_login(sb) -> bool:
     return False
 
 
+# 判断是否已登录（网站可能改版，不再硬编码标题）
+def is_logged_in(current_title: str, current_url: str) -> bool:
+    """只要 URL 正确且标题不是首页默认标题，就认为登录成功"""
+    if current_url != "https://bot-hosting.net/a/billings":
+        return False
+    # 未登录时，访问 billings 会跳转到首页，标题为默认值
+    default_home_titles = [
+        "Bot-Hosting.net | A Free Host For Discord Bots",
+        "Bot-Hosting.net",
+    ]
+    if current_title in default_home_titles:
+        return False
+    return True
+
+
 # 主流程
 def main():
     print("#" * 25)
@@ -390,7 +405,7 @@ def main():
             current_title = sb.get_title()
             print(f"📝 当前URL: {current_url}, Title: {current_title}")
 
-            if current_title == "Bot-Hosting.net | A Free Host For Discord Bots" and current_url == "https://bot-hosting.net/a/billings":
+            if is_logged_in(current_title, current_url):
                 login_ok = True
                 print("✅ SESSION_TOKEN 登录成功,当前已到达账单页")
             else:
@@ -409,7 +424,7 @@ def main():
                 current_title = sb.get_title()
                 print(f"📝 当前URL: {current_url}, Title: {current_title}")
 
-                if current_title == "Bot-Hosting.net | A Free Host For Discord Bots" and current_url == "https://bot-hosting.net/a/billings":
+                if is_logged_in(current_title, current_url):
                     login_ok = True
                     print("✅ Discord OAuth 登录成功,当前已到达账单页")
                 else:
